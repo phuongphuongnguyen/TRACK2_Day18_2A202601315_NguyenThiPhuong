@@ -10,7 +10,8 @@ derby.log
 .venv/
 *.egg-info/
 _lakehouse/
-notebooks/*.ipynb
+# Executed notebooks ARE the deliverable (rubric.md, Submission #1) — keep
+# notebooks/*.ipynb tracked. Only the Spark-path copies stay ignored.
 notebooks-spark/*.ipynb
 .pytest_cache/
 .venv*/

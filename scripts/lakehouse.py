@@ -50,6 +50,9 @@ def reset(*paths: str) -> None:
 
 ICEBERG_ROOT = ROOT / "iceberg"
 
+# {catalog directory: [SqlCatalog, ...]} — see catalog() / reset_catalog().
+_LIVE_CATALOGS: dict[str, list] = {}
+
 
 def _catalog_dir(name: str) -> Path:
     """Each caller gets its OWN catalog directory.
@@ -79,21 +82,36 @@ def catalog(name: str = "lab"):
 
     d = _catalog_dir(name)
     (d / "warehouse").mkdir(parents=True, exist_ok=True)
-    return SqlCatalog(
+    cat = SqlCatalog(
         name,
         uri=f"sqlite:///{d / 'catalog.db'}",
         warehouse=f"file://{d / 'warehouse'}",
     )
+    # Remember every live catalog so reset_catalog() can close its SQLite
+    # handles first — see the Windows note there. Keyed by directory, not by
+    # name, so tests that repoint ICEBERG_ROOT never collide.
+    _LIVE_CATALOGS.setdefault(str(d), []).append(cat)
+    return cat
 
 
 def reset_catalog(name: str = "lab") -> None:
     """Drop ONE catalog so a notebook rerun starts clean.
 
     Scoped to `name` on purpose — see `_catalog_dir`.
+
+    Disposes the SQLAlchemy engine before deleting. On POSIX this is merely
+    tidy, but on Windows an open SQLite handle makes the file undeletable —
+    and `ignore_errors=True` swallows that, leaving a half-dead catalog that
+    the next `catalog(name)` reopens with stale tables still in it.
     """
     import shutil
 
-    shutil.rmtree(_catalog_dir(name), ignore_errors=True)
+    d = _catalog_dir(name)
+    for cat in _LIVE_CATALOGS.pop(str(d), []):
+        engine = getattr(cat, "engine", None)
+        if engine is not None:
+            engine.dispose()
+    shutil.rmtree(d, ignore_errors=True)
 
 
 def namespace(cat, ns: str = "lake"):
